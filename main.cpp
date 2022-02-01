@@ -44,9 +44,10 @@ struct Force
     static int currentID;
     std::string ID;
     float x, y;
-    bool onetime;
+    // Number of frames it applies the force. -1 indicates indefinite application.
+    int onetime;
     Force() {}
-    Force(std::string _ID, float _x, float _y, bool _onetime) : ID(_ID), x(_x), y(_y), onetime(_onetime) {}
+    Force(std::string _ID, float _x, float _y, int _onetime) : ID(_ID), x(_x), y(_y), onetime(_onetime) {}
 };
 int Force::currentID = 0;
 
@@ -65,8 +66,13 @@ struct Body
                 {
                     b->generalForce->x += (*f).second->x;
                     b->generalForce->y += (*f).second->y;
-                    if ((*f).second->onetime)
-                        b->forces.erase(f++);
+                    if ((*f).second->onetime > -1)
+                    {
+                        if ((*f).second->onetime > 0)
+                            (*f).second->onetime--;
+                        else
+                            b->forces.erase(f++);
+                    }
                     else
                         ++f;
                 }
@@ -92,7 +98,7 @@ struct Body
                 {
                     if (b1->forces.find(b2->ID) == b1->forces.end())
                     {
-                        Force* f = new Force(b2->ID, 0, 0, false);
+                        Force* f = new Force(b2->ID, 0, 0, -1);
                         b1->forces.insert(std::pair<std::string, Force*>(b2->ID, f));
                     }
                     float massProduct = b1->mass*b2->mass;
@@ -120,31 +126,29 @@ struct Body
                         float distance = sqrtf(difX*difX+difY*difY);
                         if (distance*distance <= touchingDistance)
                         {
-                            float overlap = 0.5f*(distance-b1->rad-b2->rad);
+                            float overlap = 0.5*(distance-b1->rad-b2->rad); // 0.5 is going to detect the collision twice.
                             float nX = difX/distance;
                             float nY = difY/distance;
-                            if (b1->kinetic)
-                            {
-                                b1->pos.x -= nX*overlap;
-                                b1->pos.y -= nY*overlap;
-                            }
-                            if (b2->kinetic)
-                            {
-                                b2->pos.x += nX*overlap;
-                                b2->pos.y += nY*overlap;
-                            }
+                            b1->pos.x -= nX*overlap;
+                            b1->pos.y -= nY*overlap;
+                            b2->pos.x += nX*overlap;
+                            b2->pos.y += nY*overlap;
                             float velX = b1->vel.x;
                             float velY = b1->vel.y;
                             if (b1->kinetic)
                             {
-                                b1->vel.x = b2->vel.x*b2->mass/b1->mass;
-                                b1->vel.y = b2->vel.y*b2->mass/b1->mass;  
-                                //b1->ForceOn(b2->ID+"COL", b2->generalForce->x, b2->generalForce->y, true);
+                                // The first body takes the velocity of the second body, changes the direction to the bodies' position difference vector and changes the magnitude according to the mass.
+                                b1->vel.x = b2->vel.x*-nX*b2->mass/b1->mass;
+                                b1->vel.y = b2->vel.y*-nY*b2->mass/b1->mass;
+                                //b1->acc.x *= -nX;
+                                //b1->acc.y *= -nY;
+                                // Old idea using the applying force on the bodies.
+                                //b1->ForceOn(b2->ID+"COL", , b2->generalForce->y, true);
                             }
                             if (b2->kinetic)
                             {
-                                b2->vel.x = velX*b1->mass/b2->mass;
-                                b2->vel.y = velY*b1->mass/b2->mass;
+                                b2->vel.x = velX*-nX*b1->mass/b2->mass;
+                                b2->vel.y = velY*-nY*b1->mass/b2->mass;
                                 //b2->ForceOn(b1->ID+"COL", b1->generalForce->x, b2->generalForce->y, true);
                             }
                         } 
@@ -191,14 +195,14 @@ struct Body
             bodies.insert(this);
             ID = _ID;
             mass = _mass;
-            rad = _mass;
+            rad = mass;
             pos = _pos;
             vel = MAxis(0, 0);
             acc = MAxis(0, 0);
             gravitating = true;
             earthGravitating = false;
             kinetic = true;
-            generalForce = new Force("GENERAL_FORCE", 0, 0, false);
+            generalForce = new Force("GENERAL_FORCE", 0, 0, -1);
             boxShape.setRadius(rad);
             //boxShape.setSize(sf::Vector2f(bodyScale, bodyScale));
             boxShape.setOrigin(rad, rad);
@@ -209,7 +213,7 @@ struct Body
         {
             bodies.erase(this);
         }
-        void ForceOn(std::string ID, float x, float y, bool im)
+        void ForceOn(std::string ID, float x, float y, int im)
         {
             Force *f = new Force(ID, x, y, im);
             forces.insert(std::pair<std::string, Force*>(ID, f));
@@ -239,7 +243,6 @@ int main()
 {
     sf::RenderWindow window(sf::VideoMode(SCREENWIDTH, SCREENHEIGHT), "Physics");
 
-    // Create body.
     Body box1("BOX1", 60, Vec2(100, 100));
     Body box2("BOX2", 50, Vec2(100, SCREENHEIGHT-100));
     Body box3("BOX3", 40, Vec2(SCREENWIDTH-300, 200));
@@ -247,6 +250,7 @@ int main()
     Body box7("BOX7", 60, Vec2(SCREENWIDTH-60, 400));
     Body box8("BOX8", 50, Vec2(SCREENWIDTH/2, 50));
     Body box9("BOX9", 40, Vec2(300, SCREENHEIGHT/2));
+
     sf::Font font;
     if (!font.loadFromFile("Arimo-Bold.ttf"))
         std::cout << "Error loading font." << std::endl;
